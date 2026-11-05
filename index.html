@@ -1,3 +1,4 @@
+<meta charset="utf-8">
 <title>Ember &amp; Rime</title>
 <meta name="claude:viewport-fit-sides" content="cover">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -127,6 +128,9 @@ button:focus-visible{outline:2px solid var(--rime);outline-offset:2px}
 #coords{font-family:var(--font-mono);font-size:11px;color:var(--ash);white-space:nowrap;font-variant-numeric:tabular-nums}
 
 /* ---------- overlays ---------- */
+/* `display:grid` below outranks the UA rule for [hidden], so say it here:
+   without this a dismissed veil keeps covering the board and eating clicks. */
+[hidden]{display:none !important}
 .veil{
   position:fixed;inset:0;z-index:20;display:grid;place-items:center;
   background:rgba(4,6,9,.74);backdrop-filter:blur(7px);
@@ -160,6 +164,40 @@ button:focus-visible{outline:2px solid var(--rime);outline-offset:2px}
   font-family:var(--font-display);font-size:17px;letter-spacing:.04em;padding:8px 0;
 }
 .field input:focus{outline:none}
+.field input[type=number]{
+  flex:0 0 auto;width:4.6ch;text-align:center;font-size:16px;
+  -moz-appearance:textfield;appearance:textfield;
+}
+.field input[type=number]::-webkit-outer-spin-button,
+.field input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
+.field .by{font-family:var(--font-display);font-size:13px;color:var(--ash)}
+.field .unit{
+  margin-left:auto;font-size:9.5px;letter-spacing:.16em;text-transform:uppercase;
+  color:var(--ash);white-space:nowrap;
+}
+.field.off{opacity:.38;pointer-events:none}
+
+/* segmented board-shape switch */
+.seg{display:flex;gap:0;border:1px solid var(--edge);border-radius:3px;overflow:hidden}
+.seg button{
+  flex:1;border:0;border-radius:0;background:rgba(6,9,13,.75);
+  color:var(--ash);padding:10px 8px;letter-spacing:.17em;
+}
+.seg button + button{border-left:1px solid var(--edge)}
+.seg button:hover{color:var(--bone)}
+.seg button[aria-checked=true]{
+  color:var(--bone);background:linear-gradient(180deg,rgba(255,90,31,.18),rgba(95,216,255,.1));
+  box-shadow:inset 0 0 0 1px var(--edge-lit);
+}
+.seg button small{display:block;font-size:9px;letter-spacing:.1em;text-transform:none;color:var(--ash);margin-top:3px}
+
+.warn{
+  margin:0;font-size:11.5px;line-height:1.5;color:var(--molten-hot);
+  border-left:2px solid var(--molten);padding-left:9px;
+}
+button.primary[disabled]{opacity:.45;cursor:not-allowed;filter:saturate(.5)}
+button.primary.loading{cursor:progress}
+
 .legend{display:flex;flex-direction:column;gap:7px;border-top:1px solid var(--edge);padding-top:13px}
 .legend div{display:flex;gap:9px;align-items:baseline;font-size:12.5px;color:var(--ash)}
 .legend b{font-weight:600;color:var(--bone);font-size:11px;letter-spacing:.14em;text-transform:uppercase;min-width:8ch}
@@ -171,6 +209,8 @@ button:focus-visible{outline:2px solid var(--rime);outline-offset:2px}
 #victory .tally{display:flex;gap:18px;font-family:var(--font-mono);font-size:11.5px;color:var(--ash);font-variant-numeric:tabular-nums}
 #victory .tally span{display:flex;flex-direction:column;gap:3px;align-items:center}
 #victory .tally em{font-style:normal;font-size:17px;color:var(--bone)}
+#victory .tally i{font-style:normal}
+#victory .champ.draw{color:var(--bone)}
 .row{display:flex;gap:8px;flex-wrap:wrap;justify-content:center}
 
 @media (max-width:620px){
@@ -191,7 +231,7 @@ button:focus-visible{outline:2px solid var(--rime);outline-offset:2px}
   <div class="brand">
     <span class="mark">&#9670;</span>
     <h1>Ember &amp; Rime</h1>
-    <span class="rule">five in a row &middot; endless board</span>
+    <span class="rule" id="rule">five in a row &middot; endless board</span>
   </div>
 
   <div class="scores">
@@ -209,6 +249,7 @@ button:focus-visible{outline:2px solid var(--rime);outline-offset:2px}
   </div>
 
   <div class="row">
+    <button id="btn-terms" type="button" title="Change the board size or win condition">Terms</button>
     <button id="btn-reset" type="button">Reset</button>
   </div>
 </header>
@@ -232,19 +273,35 @@ button:focus-visible{outline:2px solid var(--rime);outline-offset:2px}
 
 <div class="veil" id="setup">
   <form class="card" id="setup-form">
-    <p class="eyebrow">An endless board &middot; five in a row wins</p>
-    <h2>Name your combatants</h2>
+    <p class="eyebrow" id="setup-eyebrow">A 15 &times; 15 board &middot; five in a row wins</p>
+    <h2>Set the terms</h2>
     <div class="fields">
       <label class="field fire"><span class="el">Fire</span><input id="in-X" value="Ember" maxlength="14" autocomplete="off" spellcheck="false"></label>
       <label class="field ice"><span class="el">Ice</span><input id="in-O" value="Rime" maxlength="14" autocomplete="off" spellcheck="false"></label>
     </div>
-    <div class="legend">
-      <div><b>Three</b><span>A chain that can still reach five starts to flow &mdash; lava or meltwater.</span></div>
-      <div><b>Four</b><span>The chain runs white-hot or spines over with crystal. Block an open end.</span></div>
-      <div><b>Walled in</b><span>A chain with no room left goes to ash or dull ice.</span></div>
+    <div class="seg" role="radiogroup" aria-label="Board shape">
+      <button type="button" id="seg-finite" role="radio" aria-checked="true">Fixed<small>rows &times; columns</small></button>
+      <button type="button" id="seg-infinite" role="radio" aria-checked="false">Infinite<small>loads on demand</small></button>
     </div>
-    <p class="note">Fire opens. The grid starts fifteen cells across and widens whenever a stone lands near its edge. The skirmish behind this card is a sample &mdash; it clears when you begin.</p>
-    <button class="primary" type="submit">Begin the duel</button>
+    <div class="fields">
+      <label class="field" id="row-dims">
+        <span class="el">Board</span>
+        <input id="in-rows" type="number" min="3" max="60" step="1" value="15" inputmode="numeric" aria-label="Rows">
+        <span class="by">&times;</span>
+        <input id="in-cols" type="number" min="3" max="60" step="1" value="15" inputmode="numeric" aria-label="Columns">
+        <span class="unit">rows &times; cols</span>
+      </label>
+      <label class="field">
+        <span class="el">Win</span>
+        <input id="in-win" type="number" min="3" max="12" step="1" value="5" inputmode="numeric" aria-label="Tokens in a row needed to win">
+        <span class="unit">in a row</span>
+      </label>
+    </div>
+    <p class="warn" id="setup-warn" hidden></p>
+    <div class="legend" id="setup-legend"></div>
+    <p class="note" id="setup-note"></p>
+    <button class="primary" id="btn-begin" type="submit">Begin the duel</button>
+    <button class="ghost" id="btn-resume" type="button" hidden>Keep playing</button>
   </form>
 </div>
 
@@ -255,7 +312,7 @@ button:focus-visible{outline:2px solid var(--rime);outline-offset:2px}
     <p class="note" id="win-line"></p>
     <div class="tally">
       <span><em id="win-moves">0</em>moves</span>
-      <span><em id="win-span">0</em>cells wide</span>
+      <span><em id="win-span">0</em><i id="lbl-span">cells wide</i></span>
       <span><em id="win-at">0, 0</em>final stone</span>
     </div>
     <div class="row">
@@ -273,14 +330,18 @@ button:focus-visible{outline:2px solid var(--rime);outline-offset:2px}
   var REDUCED = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   var DIRS = [[1,0],[0,1],[1,1],[1,-1]];
   var DIRNAME = ['a row','a column','a rising diagonal','a falling diagonal'];
-  var WIN = 5;          // marks in a row to win
   var CELL = 64;        // world units per cell
-  var START = 7;        // half-width of the opening grid (15 x 15)
-  var GROW = 5;         // cells added when the frontier is pushed
-  var NEAR = 3;         // how close a stone must land to push it
-  var PAD = 4.5 * CELL; // how far past the frontier the camera may drift
   var MAXSTEP = 16;     // hard cap on pan speed, CSS px per frame
   var MAXP = 460;       // particle ceiling
+
+  /* Match settings. WIN and the board shape are chosen on the setup card. */
+  var LIMITS = { dim:[3,60], win:[3,12] };
+  var WIN = 5;          // tokens in a row to win
+  var WORDS = ['zero','one','two','three','four','five','six',
+               'seven','eight','nine','ten','eleven','twelve'];
+  function word(n){ return WORDS[n] || String(n); }
+
+  var config = { names:{ X:'Ember', O:'Rime' }, infinite:false, rows:15, cols:15, win:5 };
 
   var cvs = document.getElementById('board');
   var ctx = cvs.getContext('2d');
@@ -294,8 +355,8 @@ button:focus-visible{outline:2px solid var(--rime);outline-offset:2px}
 
   var W = 1, H = 1;
 
-  var board, birth, bounds, gens, turn, tally, names;
-  var winner, winLine, winAt, playing, lastMove;
+  var board, birth, bounds, mode, turn, tally, names;
+  var winner, winLine, winAt, playing, lastMove, drawn;
   var chains, level, deadSet;
   var view, pending, vel, held;
   var particles = [];
@@ -314,15 +375,14 @@ button:focus-visible{outline:2px solid var(--rime);outline-offset:2px}
     return ((h ^ (h >> 16)) >>> 0) / 4294967296;
   }
 
-  function freshState(keepNames){
+  function freshState(nextMode){
     board = new Map();
     birth = new Map();
-    bounds = { minX:-START, maxX:START, minY:-START, maxY:START };
-    gens = [{ minX:-START, maxX:START, minY:-START, maxY:START, t:performance.now() }];
+    mode = nextMode;
+    bounds = mode.bounds;
     turn = 'X';
     tally = { X:0, O:0 };
-    if(!keepNames) names = { X:'Ember', O:'Rime' };
-    winner = null; winLine = null; winAt = 0; lastMove = null;
+    winner = null; winLine = null; winAt = 0; lastMove = null; drawn = false;
     chains = []; level = new Map(); deadSet = new Set();
     particles.length = 0;
     view = { x: CELL/2, y: CELL/2, scale: 1 };
@@ -331,16 +391,129 @@ button:focus-visible{outline:2px solid var(--rime);outline-offset:2px}
     held = Object.create(null);
   }
 
-  freshState(false);
+  /* ---------------------------------------------------------- board modes */
+  /* A mode is the board's shape and its sense of space. Both kinds answer the
+     same questions, so nothing downstream of here cares which is in play:
 
-  /* A sample skirmish sits behind the setup card: two live threes, nothing decided. */
+       bounds     {minX,maxX,minY,maxY} — the playable rectangle, live object
+       size       cell count, or Infinity
+       pad        how far past the frontier the camera may drift, world units
+       minZoom    floor for the zoom control
+       fit        whether to scale the opening view so the whole board shows
+       open(x,y)  is this cell empty AND somewhere a chain may legally reach?
+       reveal()   0..1 fade-in for a cell, for the opening ripple
+       onPlace()  reacts to a stone; returns the compass words it widened by
+       home()     world point the Origin/Centre button travels to
+       decorate() board chrome drawn under the stones
+       adopt(b,t) re-seat the mode on a restored rectangle
+
+     Finite lives here because every match needs it. Infinite lives in
+     infinite.js and is fetched the first time it is asked for. */
+
+  function finiteMode(spec){
+    var b = { minX:spec.minX, maxX:spec.maxX, minY:spec.minY, maxY:spec.maxY };
+    var t0 = performance.now();
+    var mx = (b.minX + b.maxX) / 2, my = (b.minY + b.maxY) / 2;
+    var cols = b.maxX - b.minX + 1, rows = b.maxY - b.minY + 1;
+
+    return {
+      infinite: false,
+      bounds: b,
+      size: rows * cols,
+      pad: 1.1 * CELL,
+      minZoom: 0.18,
+      fit: true,
+      homeLabel: 'Centre',
+      homeTitle: 'Return to the middle of the board',
+      shape: rows + ' × ' + cols + ' board',
+      blurb: 'The board is walled: a chain with no room left inside it dies where it stands.',
+      adopt: function(){},
+
+      /* Walled board — space beyond the edge is not room to grow. */
+      open: function(x, y){
+        return inBounds(x, y) && !board.has(K(x, y));
+      },
+      reveal: function(x, y, now){
+        var d = Math.hypot(x - mx, y - my);
+        return clamp((now - t0 - (d * 26 + hash(x, y) * 150)) / 380, 0, 1);
+      },
+      onPlace: function(){ return []; },
+      home: function(){ return [(b.minX + b.maxX + 1) / 2 * CELL, (b.minY + b.maxY + 1) / 2 * CELL]; },
+
+      /* a hairline wall, so the edge reads as a boundary rather than a frontier */
+      decorate: function(now){
+        var s = CELL * view.scale;
+        var f = clamp((now - t0 - 120) / 520, 0, 1);
+        if(f <= 0.001) return;
+        var x = toSX(b.minX * CELL), y = toSY(b.minY * CELL);
+        ctx.save();
+        ctx.strokeStyle = 'rgba(135,148,166,' + (0.3 * f) + ')';
+        ctx.lineWidth = Math.max(1, s * 0.03);
+        ctx.strokeRect(x - 1, y - 1, cols * s + 2, rows * s + 2);
+        ctx.restore();
+      }
+    };
+  }
+
+  /* The infinite engine is a separate file, fetched the first time a duel is
+     fought on an endless board and cached from then on. A classic script tag
+     (rather than import()) keeps this working straight off the filesystem. */
+  var infinitePromise = null;
+  function loadInfinite(){
+    if(infinitePromise) return infinitePromise;
+    infinitePromise = new Promise(function(resolve, reject){
+      if(window.EmberRime && window.EmberRime.infinite){ resolve(window.EmberRime.infinite); return; }
+      var s = document.createElement('script');
+      s.src = 'infinite.js';
+      s.async = true;
+      s.onload = function(){
+        if(window.EmberRime && window.EmberRime.infinite) resolve(window.EmberRime.infinite);
+        else reject(new Error('infinite.js loaded but registered no engine'));
+      };
+      s.onerror = function(){ reject(new Error('infinite.js could not be reached')); };
+      document.head.appendChild(s);
+    });
+    /* a failed load must not poison later attempts */
+    infinitePromise.catch(function(){ infinitePromise = null; });
+    return infinitePromise;
+  }
+
+  /* What the infinite engine is allowed to touch. */
+  var env = {
+    CELL: CELL,
+    hash: hash,
+    clamp: clamp,
+    key: K,
+    ctx: ctx,
+    cells: function(){ return board; },
+    dims: function(){ return [W, H]; },
+    scale: function(){ return view.scale; },
+    toSX: function(v){ return toSX(v); },
+    toSY: function(v){ return toSY(v); },
+    toWX: function(v){ return toWX(v); },
+    toWY: function(v){ return toWY(v); },
+    cx: function(v){ return cx(v); },
+    inBounds: function(x, y){ return inBounds(x, y); },
+    win: function(){ return WIN; }
+  };
+
+  names = { X:config.names.X, O:config.names.O };
+  freshState(finiteMode({ minX:0, maxX:14, minY:0, maxY:14 }));
+
+  /* A sample skirmish sits behind the setup card: two live threes, nothing
+     decided. It runs on a plain 15 x 15 board so that opening the game never
+     drags in the infinite engine. */
   function seedDemo(){
-    [[-3,1],[-2,1],[-1,1],[2,2],[0,3]].forEach(function(c){ board.set(K(c[0],c[1]), 'X'); });
-    [[1,-2],[1,-1],[1,0],[-4,2],[3,1]].forEach(function(c){ board.set(K(c[0],c[1]), 'O'); });
+    WIN = 5;
+    freshState(finiteMode({ minX:0, maxX:14, minY:0, maxY:14 }));
+    names = { X:'Ember', O:'Rime' };
+    [[4,8],[5,8],[6,8],[9,9],[7,10]].forEach(function(c){ board.set(K(c[0],c[1]), 'X'); });
+    [[8,5],[8,6],[8,7],[3,9],[10,8]].forEach(function(c){ board.set(K(c[0],c[1]), 'O'); });
     var now = performance.now();
     board.forEach(function(_, k){ birth.set(k, now - 1400); });
     tally = { X:5, O:5 };
-    lastMove = { x:1, y:0, p:'O' };
+    lastMove = { x:8, y:7, p:'O' };
+    fitView();
     analyze();
   }
 
@@ -369,34 +542,42 @@ button:focus-visible{outline:2px solid var(--rime);outline-offset:2px}
   function cx(x){ return x * CELL + CELL / 2; }
 
   function clampView(){
-    var lo = bounds.minX * CELL - PAD, hi = (bounds.maxX + 1) * CELL + PAD;
+    var pad = mode.pad;
+    var bw = (bounds.maxX - bounds.minX + 1) * CELL;
+    var bh = (bounds.maxY - bounds.minY + 1) * CELL;
+    var lo = bounds.minX * CELL - pad, hi = (bounds.maxX + 1) * CELL + pad;
     var before = view.x;
-    view.x = clamp(view.x, lo, hi);
+
+    /* On a walled board narrower than the viewport there is nothing to pan to,
+       so the camera parks on the middle instead of drifting against a stop. */
+    if(!mode.infinite && bw * view.scale <= W) view.x = (lo + hi) / 2;
+    else view.x = clamp(view.x, lo, hi);
     if(view.x !== before){ pending.x = 0; vel.x = 0; }
-    lo = bounds.minY * CELL - PAD; hi = (bounds.maxY + 1) * CELL + PAD;
+
+    lo = bounds.minY * CELL - pad; hi = (bounds.maxY + 1) * CELL + pad;
     before = view.y;
-    view.y = clamp(view.y, lo, hi);
+    if(!mode.infinite && bh * view.scale <= H) view.y = (lo + hi) / 2;
+    else view.y = clamp(view.y, lo, hi);
     if(view.y !== before){ pending.y = 0; vel.y = 0; }
+  }
+
+  /* Open a walled board at a scale that shows all of it. */
+  function fitView(){
+    var h = mode.home();
+    view.x = h[0]; view.y = h[1];
+    pending.x = 0; pending.y = 0; vel.x = 0; vel.y = 0;
+    if(!mode.fit){ clampView(); return; }
+    var bw = (bounds.maxX - bounds.minX + 1) * CELL;
+    var bh = (bounds.maxY - bounds.minY + 1) * CELL;
+    view.scale = clamp(Math.min((W - 26) / bw, (H - 26) / bh), mode.minZoom, 1.6);
+    clampView();
   }
 
   function inBounds(x, y){
     return x >= bounds.minX && x <= bounds.maxX && y >= bounds.minY && y <= bounds.maxY;
   }
 
-  /* When was this cell revealed? Oldest matching generation wins. */
-  function bornAt(x, y){
-    for(var i = 0; i < gens.length; i++){
-      var g = gens[i];
-      if(x >= g.minX && x <= g.maxX && y >= g.minY && y <= g.maxY) return g.t;
-    }
-    return Infinity;
-  }
-  function reveal(x, y, now){
-    var t = bornAt(x, y);
-    if(t === Infinity) return 0;
-    var delay = Math.max(Math.abs(x), Math.abs(y)) * 22 + hash(x, y) * 160;
-    return clamp((now - t - delay) / 380, 0, 1);
-  }
+  function reveal(x, y, now){ return mode.reveal(x, y, now); }
 
   /* ---------------------------------------------------------------- rules */
   function analyze(){
@@ -416,14 +597,17 @@ button:focus-visible{outline:2px solid var(--rime);outline-offset:2px}
         var cells = [], ax = x, ay = y;
         while(board.get(K(ax, ay)) === p){ cells.push([ax, ay]); ax += dx; ay += dy; }
         var len = cells.length;
-        if(len < 3) continue;
+        /* Short enough to be noise, or two short of the win on a tight board:
+           either way it is not worth lighting up. */
+        if(len < Math.max(2, Math.min(3, WIN - 2))) continue;
 
-        /* The board is genuinely endless, so empty space counts as room to grow
-           no matter which side of the current frontier it sits on. */
+        /* Room left at either end. What counts as room is the mode's business:
+           endless boards treat all empty space as reachable, walled ones stop
+           at the edge. */
         var fwd = 0, fx = ax, fy = ay;
-        while(fwd < WIN && !board.has(K(fx, fy))){ fwd++; fx += dx; fy += dy; }
+        while(fwd < WIN && mode.open(fx, fy)){ fwd++; fx += dx; fy += dy; }
         var bwd = 0, bx = x - dx, by = y - dy;
-        while(bwd < WIN && !board.has(K(bx, by))){ bwd++; bx -= dx; by -= dy; }
+        while(bwd < WIN && mode.open(bx, by)){ bwd++; bx -= dx; by -= dy; }
 
         if(len >= WIN){
           winner = p;
@@ -440,37 +624,28 @@ button:focus-visible{outline:2px solid var(--rime);outline-offset:2px}
         var ends = [];
         if(fwd > 0) ends.push([ax, ay]);
         if(bwd > 0) ends.push([x - dx, y - dy]);
-        var lv = len >= 4 ? 2 : 1;
+        /* 2 = one stone from the end, 1 = two away, 0 = merely linked.
+           On a long win condition the 0 tier keeps early chains visible
+           without promising more than they are. */
+        var lv = len >= WIN - 1 ? 2 : len >= WIN - 2 ? 1 : 0;
         cells.forEach(function(c){
           var k = K(c[0], c[1]);
-          if((level.get(k) || 0) < lv) level.set(k, lv);
+          if(!level.has(k) || level.get(k) < lv) level.set(k, lv);
         });
         chains.push({
           cells: cells, player: p, dir: d, len: len, dead: false, ends: ends,
-          unstoppable: len === 4 && fwd > 0 && bwd > 0
+          unstoppable: len === WIN - 1 && fwd > 0 && bwd > 0
         });
       }
     });
 
     /* A cell carried by any live chain is never shown as ash. */
-    deadSet.forEach(function(k){ if(level.get(k)) deadSet.delete(k); });
+    deadSet.forEach(function(k){ if(level.has(k)) deadSet.delete(k); });
     chains.sort(function(a, b){ return (a.dead ? 0 : a.len) - (b.dead ? 0 : b.len); });
   }
 
-  function grow(x, y){
-    var widened = [];
-    if(x - bounds.minX <= NEAR){ bounds.minX -= GROW; widened.push('west'); }
-    if(bounds.maxX - x <= NEAR){ bounds.maxX += GROW; widened.push('east'); }
-    if(y - bounds.minY <= NEAR){ bounds.minY -= GROW; widened.push('north'); }
-    if(bounds.maxY - y <= NEAR){ bounds.maxY += GROW; widened.push('south'); }
-    if(widened.length){
-      gens.push({ minX:bounds.minX, maxX:bounds.maxX, minY:bounds.minY, maxY:bounds.maxY, t:performance.now() });
-    }
-    return widened;
-  }
-
   function place(x, y){
-    if(!playing || winner) return false;
+    if(!playing || winner || drawn) return false;
     if(!inBounds(x, y) || board.has(K(x, y))) return false;
 
     var p = turn;
@@ -478,12 +653,15 @@ button:focus-visible{outline:2px solid var(--rime);outline-offset:2px}
     birth.set(K(x, y), performance.now());
     tally[p]++;
     lastMove = { x:x, y:y, p:p };
-    var widened = grow(x, y);
+    var widened = mode.onPlace(x, y);
     analyze();
 
     if(winner){
       winAt = performance.now();
       burst(cx(x), cx(y), p, 90);
+      showVictory();
+    } else if(board.size >= mode.size){
+      drawn = true;
       showVictory();
     } else {
       turn = p === 'X' ? 'O' : 'X';
@@ -506,24 +684,27 @@ button:focus-visible{outline:2px solid var(--rime);outline-offset:2px}
   function say(widened){
     var bits = [];
     if(winner){
-      bits.push(who(winner) + ' takes five.');
+      bits.push(who(winner) + ' takes ' + word(WIN) + '.');
+    } else if(drawn){
+      bits.push('<span class="dim">The board is full. Neither line held &mdash; a stalemate.</span>');
     } else {
       var mine = chains.filter(function(c){ return !c.dead && c.player === lastMove.p; });
-      var four = mine.filter(function(c){ return c.len === 4; });
-      var open = four.filter(function(c){ return c.unstoppable; });
-      var three = mine.filter(function(c){ return c.len === 3; });
+      var open = mine.filter(function(c){ return c.unstoppable; });
+      var best = 0;
+      mine.forEach(function(c){ if(c.len > best) best = c.len; });
 
       if(open.length){
-        bits.push(who(lastMove.p) + ' has an open four. It cannot be blocked.');
-      } else if(four.length){
-        bits.push(who(lastMove.p) + ' holds four &mdash; one stone from the end.');
-      } else if(three.length){
-        bits.push(who(lastMove.p) + (lastMove.p === 'X' ? ' links three. The flame is spreading.' : ' links three. The ice is spreading.'));
+        bits.push(who(lastMove.p) + ' has an open ' + word(WIN - 1) + '. It cannot be blocked.');
+      } else if(best === WIN - 1){
+        bits.push(who(lastMove.p) + ' holds ' + word(WIN - 1) + ' &mdash; one stone from the end.');
+        bits.push('<span class="dim">Block an open end.</span>');
+      } else if(best === WIN - 2){
+        bits.push(who(lastMove.p) + ' links ' + word(best) +
+          (lastMove.p === 'X' ? '. The flame is spreading.' : '. The ice is spreading.'));
+      } else if(best >= 3){
+        bits.push(who(lastMove.p) + ' links ' + word(best) + '.');
       } else {
         bits.push(who(turn) + ' to move.');
-      }
-      if(four.length && !open.length){
-        bits.push('<span class="dim">Block an open end.</span>');
       }
     }
     if(widened && widened.length){
@@ -537,11 +718,17 @@ button:focus-visible{outline:2px solid var(--rime);outline-offset:2px}
       document.getElementById('name-' + p).textContent = names[p];
       document.getElementById('count-' + p).textContent = tally[p];
       var card = document.getElementById('card-' + p);
-      var on = playing && !winner && turn === p;
+      var on = playing && !winner && !drawn && turn === p;
       card.classList.toggle('on', on);
       document.getElementById('role-' + p).textContent =
-        winner === p ? 'victor' : winner ? 'defeated' : on ? 'to move' : 'waiting';
+        winner === p ? 'victor' : winner ? 'defeated' :
+        drawn ? 'stalemate' : on ? 'to move' : 'waiting';
     });
+    document.getElementById('rule').textContent =
+      word(WIN) + ' in a row · ' + mode.shape;
+    var homeBtn = document.getElementById('btn-home');
+    homeBtn.textContent = mode.homeLabel;
+    homeBtn.title = mode.homeTitle;
   }
 
   /* ------------------------------------------------------------ particles */
@@ -749,7 +936,7 @@ button:focus-visible{outline:2px solid var(--rime);outline-offset:2px}
 
   function drawConduit(ch, now){
     var s = CELL * view.scale;
-    var big = ch.len >= 4 || ch.len >= WIN;
+    var big = ch.len >= WIN - 1;
     var fire = ch.player === 'X';
     var pts = ch.cells.map(function(c){ return [toSX(cx(c[0])), toSY(cx(c[1]))]; });
     var a = pts[0], b = pts[pts.length - 1];
@@ -873,38 +1060,8 @@ button:focus-visible{outline:2px solid var(--rime);outline-offset:2px}
       }
     }
 
-    /* the void just past the frontier: faint motes, so the edge reads as "more to come" */
-    var vx0 = Math.floor(toWX(0) / CELL) - 1, vx1 = Math.ceil(toWX(W) / CELL) + 1;
-    var vy0 = Math.floor(toWY(0) / CELL) - 1, vy1 = Math.ceil(toWY(H) / CELL) + 1;
-    ctx.fillStyle = 'rgba(135,148,166,0.14)';
-    for(var vy = vy0; vy <= vy1; vy++){
-      for(var vx = vx0; vx <= vx1; vx++){
-        if(inBounds(vx, vy)) continue;
-        var d = Math.max(
-          bounds.minX - vx, vx - bounds.maxX,
-          bounds.minY - vy, vy - bounds.maxY, 0
-        );
-        if(d > 3) continue;
-        ctx.globalAlpha = (1 - d / 4) * 0.5;
-        ctx.fillRect(toSX(cx(vx)) - 1, toSY(cx(vy)) - 1, 2, 2);
-      }
-    }
-    ctx.globalAlpha = 1;
-
-    /* the starting point stays marked, however far play travels from it */
-    var f0 = reveal(0, 0, now);
-    if(f0 > 0 && !board.has('0,0')){
-      var mx = toSX(cx(0)), my = toSY(cx(0)), r = s * 0.17;
-      ctx.save();
-      ctx.strokeStyle = 'rgba(135,148,166,' + (0.4 * f0) + ')';
-      ctx.lineWidth = Math.max(1, s * 0.018);
-      ctx.beginPath();
-      ctx.moveTo(mx, my - r); ctx.lineTo(mx + r, my);
-      ctx.lineTo(mx, my + r); ctx.lineTo(mx - r, my);
-      ctx.closePath();
-      ctx.stroke();
-      ctx.restore();
-    }
+    /* the frontier or the wall, whichever this board has */
+    mode.decorate(now);
   }
 
   function drawStones(now){
@@ -1090,7 +1247,7 @@ button:focus-visible{outline:2px solid var(--rime);outline-offset:2px}
 
   function zoomAt(factor, px, py){
     var before = view.scale;
-    var after = clamp(before * factor, 0.42, 1.6);
+    var after = clamp(before * factor, mode.minZoom, 1.6);
     if(after === before) return;
     if(px == null){ px = W / 2; py = H / 2; }
     var wxp = toWX(px), wyp = toWY(py);
@@ -1195,7 +1352,7 @@ button:focus-visible{outline:2px solid var(--rime);outline-offset:2px}
   window.addEventListener('keydown', function(e){
     if(e.target && /^(INPUT|TEXTAREA)$/.test(e.target.tagName)) return;
     if(/^Arrow/.test(e.key)){ held[e.key] = true; e.preventDefault(); }
-    else if(e.key === '0'){ glide(CELL / 2, CELL / 2); }
+    else if(e.key === '0'){ var h = mode.home(); glide(h[0], h[1]); }
     else if(e.key === '+' || e.key === '='){ zoomAt(1.18); }
     else if(e.key === '-'){ zoomAt(1 / 1.18); }
   });
@@ -1214,7 +1371,10 @@ button:focus-visible{outline:2px solid var(--rime);outline-offset:2px}
 
   document.getElementById('btn-in').addEventListener('click', function(){ zoomAt(1.2); });
   document.getElementById('btn-out').addEventListener('click', function(){ zoomAt(1 / 1.2); });
-  document.getElementById('btn-home').addEventListener('click', function(){ glide(CELL / 2, CELL / 2); });
+  document.getElementById('btn-home').addEventListener('click', function(){
+    var h = mode.home();
+    glide(h[0], h[1]);
+  });
   document.getElementById('btn-last').addEventListener('click', function(){
     if(lastMove) glide(cx(lastMove.x), cx(lastMove.y));
   });
@@ -1224,7 +1384,7 @@ button:focus-visible{outline:2px solid var(--rime);outline-offset:2px}
       clearTimeout(armTimer);
       resetBtn.classList.remove('armed');
       resetBtn.textContent = 'Reset';
-      startMatch(names.X, names.O);
+      startMatch(config);
       return;
     }
     resetBtn.classList.add('armed');
@@ -1236,50 +1396,214 @@ button:focus-visible{outline:2px solid var(--rime);outline-offset:2px}
   });
 
   /* ------------------------------------------------------------- lifecycle */
-  function startMatch(nx, no){
-    var keep = { X: nx || 'Ember', O: no || 'Rime' };
-    freshState(false);
-    names = keep;
-    playing = true;
-    victoryEl.hidden = true;
-    setupEl.hidden = true;
-    analyze();
-    paintRail();
-    statusEl.innerHTML = who('X') + ' opens. Five in a row, any direction.';
+  /* Resolve a config into a board mode. Only the infinite branch waits. */
+  function buildMode(cfg){
+    if(!cfg.infinite){
+      return Promise.resolve(finiteMode({
+        minX:0, maxX:cfg.cols - 1, minY:0, maxY:cfg.rows - 1
+      }));
+    }
+    return loadInfinite().then(function(factory){ return factory(env); });
+  }
+
+  function startMatch(cfg, onFail){
+    beginBtn.classList.add('loading');
+    beginBtn.disabled = true;
+    if(cfg.infinite && !(window.EmberRime && window.EmberRime.infinite)){
+      beginBtn.textContent = 'Unrolling the endless board…';
+    }
+    buildMode(cfg).then(function(m){
+      resetBeginBtn();
+      config = cfg;
+      WIN = cfg.win;
+      freshState(m);
+      names = { X:cfg.names.X, O:cfg.names.O };
+      playing = true;
+      victoryEl.hidden = true;
+      setupEl.hidden = true;
+      resumeBtn.hidden = true;
+      fitView();
+      analyze();
+      paintRail();
+      statusEl.innerHTML = who('X') + ' opens. ' + word(WIN).replace(/^./, function(c){
+        return c.toUpperCase();
+      }) + ' in a row, any direction.';
+    }, function(err){
+      resetBeginBtn();
+      if(onFail) onFail(err);
+    });
+  }
+
+  function resetBeginBtn(){
+    beginBtn.classList.remove('loading');
+    beginBtn.disabled = false;
+    beginBtn.textContent = 'Begin the duel';
   }
 
   function showVictory(){
     playing = true;
-    var fire = winner === 'X';
-    document.getElementById('win-name').textContent = names[winner];
-    document.getElementById('win-name').className = 'champ ' + (fire ? 'f' : 'i');
-    document.getElementById('win-kind').textContent = fire ? 'The fire takes five' : 'The ice takes five';
-    var a = winLine.cells[0], b = winLine.cells[winLine.cells.length - 1];
-    document.getElementById('win-line').textContent =
-      'Five in ' + DIRNAME[winLine.dir] + ', from ' + a[0] + ', ' + a[1] + ' to ' + b[0] + ', ' + b[1] + '.';
+    var kind = document.getElementById('win-kind');
+    var nameEl = document.getElementById('win-name');
+    var lineEl = document.getElementById('win-line');
+
+    if(drawn){
+      kind.textContent = 'No line to be had';
+      nameEl.textContent = 'Stalemate';
+      nameEl.className = 'champ draw';
+      lineEl.textContent = 'Every cell is spoken for and no chain reached ' + word(WIN) + '.';
+    } else {
+      var fire = winner === 'X';
+      nameEl.textContent = names[winner];
+      nameEl.className = 'champ ' + (fire ? 'f' : 'i');
+      kind.textContent = (fire ? 'The fire takes ' : 'The ice takes ') + word(WIN);
+      var a = winLine.cells[0], b = winLine.cells[winLine.cells.length - 1];
+      lineEl.textContent = word(WIN).replace(/^./, function(c){ return c.toUpperCase(); }) +
+        ' in ' + DIRNAME[winLine.dir] +
+        ', from ' + a[0] + ', ' + a[1] + ' to ' + b[0] + ', ' + b[1] + '.';
+    }
+
     document.getElementById('win-moves').textContent = tally.X + tally.O;
-    document.getElementById('win-span').textContent = (bounds.maxX - bounds.minX + 1);
+    document.getElementById('win-span').textContent = mode.infinite
+      ? (bounds.maxX - bounds.minX + 1)
+      : mode.bounds.maxY - mode.bounds.minY + 1 + '×' + (mode.bounds.maxX - mode.bounds.minX + 1);
+    document.getElementById('lbl-span').textContent = mode.infinite ? 'cells wide' : 'board';
     document.getElementById('win-at').textContent = lastMove.x + ', ' + lastMove.y;
-    setTimeout(function(){ victoryEl.hidden = false; }, 1150);
+    paintRail();
+    setTimeout(function(){ victoryEl.hidden = false; }, drawn ? 450 : 1150);
   }
+
+  /* ----------------------------------------------------------- setup card */
+  var segFinite = document.getElementById('seg-finite');
+  var segInfinite = document.getElementById('seg-infinite');
+  var inRows = document.getElementById('in-rows');
+  var inCols = document.getElementById('in-cols');
+  var inWin = document.getElementById('in-win');
+  var dimsRow = document.getElementById('row-dims');
+  var warnEl = document.getElementById('setup-warn');
+  var beginBtn = document.getElementById('btn-begin');
+  var wantInfinite = false;
+
+  function intField(el, fallback){
+    var v = parseInt(el.value, 10);
+    return isFinite(v) ? v : fallback;
+  }
+
+  /* Read the card without correcting it — typing "1" on the way to "12"
+     should not be snapped out from under the cursor. */
+  function readSetup(){
+    return {
+      names: {
+        X: document.getElementById('in-X').value.trim() || 'Ember',
+        O: document.getElementById('in-O').value.trim() || 'Rime'
+      },
+      infinite: wantInfinite,
+      rows: intField(inRows, 15),
+      cols: intField(inCols, 15),
+      win: intField(inWin, 5)
+    };
+  }
+
+  function problem(cfg){
+    var d = LIMITS.dim, w = LIMITS.win;
+    if(cfg.win < w[0] || cfg.win > w[1]){
+      return 'A win needs between ' + w[0] + ' and ' + w[1] + ' tokens in a row.';
+    }
+    if(cfg.infinite) return null;
+    if(cfg.rows < d[0] || cfg.cols < d[0] || cfg.rows > d[1] || cfg.cols > d[1]){
+      return 'Rows and columns run from ' + d[0] + ' to ' + d[1] + '.';
+    }
+    if(cfg.win > Math.max(cfg.rows, cfg.cols)){
+      return cfg.win + ' in a row will not fit on a ' + cfg.rows + ' × ' + cfg.cols +
+        ' board. Widen it, or lower the win.';
+    }
+    return null;
+  }
+
+  function paintSetup(){
+    var cfg = readSetup();
+    var bad = problem(cfg);
+    dimsRow.classList.toggle('off', cfg.infinite);
+    dimsRow.setAttribute('aria-hidden', cfg.infinite ? 'true' : 'false');
+    inRows.disabled = inCols.disabled = cfg.infinite;
+    segFinite.setAttribute('aria-checked', cfg.infinite ? 'false' : 'true');
+    segInfinite.setAttribute('aria-checked', cfg.infinite ? 'true' : 'false');
+
+    document.getElementById('setup-eyebrow').innerHTML = cfg.infinite
+      ? 'An endless board · ' + word(cfg.win) + ' in a row wins'
+      : 'A ' + cfg.rows + ' &times; ' + cfg.cols + ' board · ' + word(cfg.win) + ' in a row wins';
+
+    var n = cfg.win;
+    document.getElementById('setup-legend').innerHTML = (n > 3
+      ? '<div><b>' + word(n - 2) + '</b><span>A chain that can still reach ' + word(n) +
+        ' starts to flow &mdash; lava or meltwater.</span></div>'
+      : '') +
+      '<div><b>' + word(n - 1) + '</b><span>The chain runs white-hot or spines over with crystal. ' +
+        'Block an open end.</span></div>' +
+      '<div><b>Walled in</b><span>A chain with no room left goes to ash or dull ice.</span></div>';
+
+    document.getElementById('setup-note').textContent = 'Fire opens. ' + (cfg.infinite
+      ? 'The grid starts fifteen cells across and widens whenever a stone lands near its edge. The endless engine is a separate file, fetched when you begin.'
+      : 'Space beyond the wall is not room to grow, so a chain can be smothered against the edge.');
+
+    warnEl.textContent = bad || '';
+    warnEl.hidden = !bad;
+    beginBtn.disabled = !!bad;
+    return cfg;
+  }
+
+  segFinite.addEventListener('click', function(){ wantInfinite = false; paintSetup(); });
+  segInfinite.addEventListener('click', function(){ wantInfinite = true; paintSetup(); });
+  [inRows, inCols, inWin].forEach(function(el){
+    el.addEventListener('input', paintSetup);
+    el.addEventListener('change', paintSetup);
+  });
 
   document.getElementById('setup-form').addEventListener('submit', function(e){
     e.preventDefault();
-    startMatch(
-      document.getElementById('in-X').value.trim(),
-      document.getElementById('in-O').value.trim()
-    );
+    var cfg = paintSetup();
+    if(problem(cfg)) return;
+    startMatch(cfg, function(err){
+      warnEl.textContent = 'The endless board could not be loaded (' + err.message +
+        '). Pick a fixed size, or check that infinite.js sits beside index.html.';
+      warnEl.hidden = false;
+    });
   });
-  document.getElementById('btn-rematch').addEventListener('click', function(){
-    startMatch(names.X, names.O);
-  });
-  document.getElementById('btn-newduel').addEventListener('click', function(){
+
+  /* Reopen the terms. A match still in progress can be resumed instead of
+     replaced, so changing your mind about the board costs nothing. */
+  var resumeBtn = document.getElementById('btn-resume');
+  function openSetup(canResume){
     victoryEl.hidden = true;
     setupEl.hidden = false;
+    resumeBtn.hidden = !canResume;
     document.getElementById('in-X').value = names.X;
     document.getElementById('in-O').value = names.O;
+    wantInfinite = config.infinite;
+    if(!config.infinite){
+      inRows.value = config.rows;
+      inCols.value = config.cols;
+    }
+    inWin.value = config.win;
     playing = false;
+    paintSetup();
+    paintRail();
     document.getElementById('in-X').focus();
+  }
+
+  document.getElementById('btn-rematch').addEventListener('click', function(){
+    startMatch(config);
+  });
+  document.getElementById('btn-newduel').addEventListener('click', function(){
+    openSetup(false);
+  });
+  document.getElementById('btn-terms').addEventListener('click', function(){
+    openSetup(playing && !winner && !drawn && board.size > 0);
+  });
+  resumeBtn.addEventListener('click', function(){
+    setupEl.hidden = true;
+    resumeBtn.hidden = true;
+    playing = true;
+    paintRail();
   });
 
   /* --------------------------------------------------------------- render */
@@ -1295,7 +1619,7 @@ button:focus-visible{outline:2px solid var(--rime);outline-offset:2px}
     drawStones(now);
     for(i = 0; i < chains.length; i++){
       var ch = chains[i];
-      if(ch.dead || ch.len < 4) continue;
+      if(ch.dead || ch.len < WIN - 1) continue;
       for(var j = 0; j < ch.ends.length; j++) drawEnd(ch.ends[j], ch.player, now, ch.unstoppable);
     }
     drawHover(now);
@@ -1316,31 +1640,49 @@ button:focus-visible{outline:2px solid var(--rime);outline-offset:2px}
   }
 
   /* ----------------------------------------------------------------- boot */
+  function restore(data, m){
+    var cfg = data.config;
+    config = cfg;
+    WIN = cfg.win;
+    freshState(m);
+    if(data.bounds) m.adopt(data.bounds, performance.now() - 2000);
+    bounds = m.bounds;
+    names = data.names || { X:cfg.names.X, O:cfg.names.O };
+    var t0 = performance.now() - 1500;
+    data.cells.forEach(function(e){ board.set(e[0], e[1]); birth.set(e[0], t0); });
+    tally = data.tally || tally;
+    turn = data.turn || 'X';
+    lastMove = data.lastMove || null;
+    playing = !!data.playing;
+    if(data.view) view = data.view;
+    else fitView();
+    analyze();
+    if(winner){ winAt = performance.now(); showVictory(); }
+    else if(board.size >= m.size){ drawn = true; showVictory(); }
+    setupEl.hidden = playing;
+    wantInfinite = cfg.infinite;
+    if(!cfg.infinite){ inRows.value = cfg.rows; inCols.value = cfg.cols; }
+    inWin.value = cfg.win;
+    paintSetup();
+    paintRail();
+    if(lastMove) say([]);
+    else statusEl.innerHTML = who('X') + ' opens.';
+  }
+
+  function demo(){
+    playing = false;
+    seedDemo();
+    paintSetup();
+    paintRail();
+    statusEl.innerHTML = '<span class="dim">A sample skirmish. Set the terms to begin.</span>';
+  }
+
   function start(data){
     resize();
-    if(data && data.cells && data.cells.length){
-      freshState(false);
-      names = data.names || names;
-      bounds = data.bounds || bounds;
-      gens = [{ minX:bounds.minX, maxX:bounds.maxX, minY:bounds.minY, maxY:bounds.maxY, t:performance.now() - 2000 }];
-      var t0 = performance.now() - 1500;
-      data.cells.forEach(function(e){ board.set(e[0], e[1]); birth.set(e[0], t0); });
-      tally = data.tally || tally;
-      turn = data.turn || 'X';
-      lastMove = data.lastMove || null;
-      playing = !!data.playing;
-      if(data.view) view = data.view;
-      analyze();
-      if(winner){ winAt = performance.now(); showVictory(); }
-      setupEl.hidden = playing;
-      paintRail();
-      if(lastMove) say([]);
-      else statusEl.innerHTML = who('X') + ' opens. Five in a row, any direction.';
+    if(data && data.cells && data.cells.length && data.config){
+      buildMode(data.config).then(function(m){ restore(data, m); }, demo);
     } else {
-      playing = false;
-      seedDemo();
-      paintRail();
-      statusEl.innerHTML = '<span class="dim">A sample skirmish. Name your combatants to begin.</span>';
+      demo();
     }
     requestAnimationFrame(frame);
   }
@@ -1349,7 +1691,8 @@ button:focus-visible{outline:2px solid var(--rime);outline-offset:2px}
     window.claude.hot.snapshot(function(){
       return {
         cells: Array.from(board.entries()),
-        bounds: bounds, turn: turn, tally: tally, names: names,
+        bounds: { minX:bounds.minX, maxX:bounds.maxX, minY:bounds.minY, maxY:bounds.maxY },
+        config: config, turn: turn, tally: tally, names: names,
         lastMove: lastMove, playing: playing, view: view
       };
     });
