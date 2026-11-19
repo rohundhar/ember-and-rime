@@ -61,10 +61,19 @@ rewards building two threats at once.
 ## Files
 
 ```
-index.html    the whole game: markup, styles, rules, renderer
-infinite.js   the endless-board engine, loaded on demand
+index.html            the whole game: markup, styles, rules, renderer
+infinite.js           the endless-board engine, loaded on demand
+favicon.svg           the tab logo — half X in fire, half O in ice
+favicon.png           32px fallback, for browsers without SVG favicons
+apple-touch-icon.png  180px, for iOS home screens
 README.md
 ```
+
+The icon is hand-written SVG; the two PNGs are rendered from it, so edit
+`favicon.svg` and re-export rather than touching them directly. Without the
+`<link rel="icon">` tags in the head a browser falls back to requesting
+`/favicon.ico` from the server root, which is how someone else's logo ends up
+on the tab.
 
 `index.html` is self-contained and plays fixed boards on its own.
 `infinite.js` is fetched the first time someone actually begins an infinite
